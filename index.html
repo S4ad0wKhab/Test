@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Viewer & Runner (with Pyodide)</title>
+    <!-- นำเข้า Pyodide จาก CDN -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+    <style>
+        /* พื้นหลังสีน้ำเงิน */
+        body {
+            background-color: #0056b3; 
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* กรอบสีขาวตรงกลาง */
+        .container {
+            background-color: #ffffff;
+            width: 90%;
+            max-width: 700px;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            transition: all 0.3s ease; /* เอฟเฟกต์ตอนยืดกรอบ */
+        }
+
+        h2 {
+            margin-top: 0;
+            text-align: center;
+            color: #333;
+        }
+
+        /* สถานะการโหลด Pyodide */
+        #status {
+            text-align: center;
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        /* ช่องเลือกไฟล์ */
+        select {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+        }
+
+        /* ช่องแสดงโค้ด (เลื่อนดูได้) */
+        #codeViewer {
+            width: 100%;
+            height: 250px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 15px;
+            box-sizing: border-box;
+            font-family: 'Courier New', Courier, monospace;
+            white-space: pre-wrap;
+            color: #212529;
+            margin-bottom: 15px;
+        }
+
+        /* ปุ่มรันโค้ดสีน้ำเงิน */
+        button {
+            width: 100%;
+            background-color: #0d6efd;
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: #0b5ed7;
+        }
+        
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        /* ช่องแสดงผลลัพธ์การรัน (ซ่อนไว้ตอนแรก) */
+        #outputArea {
+            display: none;
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #1e1e1e;
+            color: #4af626; /* สีเขียวแบบ Terminal */
+            border-radius: 6px;
+            font-family: 'Courier New', Courier, monospace;
+            min-height: 100px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>My Code Viewer</h2>
+        <div id="status">กำลังเตรียมความพร้อม Pyodide... (อาจใช้เวลาสักครู่)</div>
+        
+        <select id="fileSelect">
+            <option value="">-- กรุณาเลือกไฟล์ --</option>
+        </select>
+
+        <div id="codeViewer">เนื้อหาโค้ดจะแสดงที่นี่...</div>
+
+        <button id="runBtn" disabled>▶ Run Code</button>
+
+        <div id="outputArea"></div>
+    </div>
+
+    <script>
+        // --- ส่วนที่ต้องแก้ไขให้เป็นของตัวเอง ---
+        const GITHUB_USERNAME = 'S4ad0wKhab'; 
+        const REPOSITORY_NAME = 'Test';
+        // ------------------------------------
+
+        const FOLDER_NAME = 'code';
+        const fileSelect = document.getElementById('fileSelect');
+        const codeViewer = document.getElementById('codeViewer');
+        const runBtn = document.getElementById('runBtn');
+        const outputArea = document.getElementById('outputArea');
+        const statusText = document.getElementById('status');
+        
+        let currentCode = '';
+        let currentFileName = '';
+        let pyodide = null;
+
+        // 1. โหลด Pyodide (สำหรับรัน Python)
+        async function initPyodide() {
+            try {
+                pyodide = await loadPyodide({
+                    // ตั้งค่าให้ดักจับ print() ของ Python มาแสดงใน JavaScript
+                    stdout: (text) => {
+                        outputArea.textContent += text + '\n';
+                    },
+                    stderr: (text) => {
+                        outputArea.textContent += text + '\n';
+                    }
+                });
+                statusText.textContent = "ระบบพร้อมใช้งาน (Pyodide Loaded)";
+                statusText.style.color = "green";
+                // เปิดให้กดปุ่ม Run ได้เมื่อ Pyodide โหลดเสร็จ
+                if(currentCode) runBtn.disabled = false;
+            } catch (error) {
+                statusText.textContent = "เกิดข้อผิดพลาดในการโหลด Pyodide";
+                statusText.style.color = "red";
+                console.error(error);
+            }
+        }
+
+        // 2. ดึงรายชื่อไฟล์จาก GitHub API
+        async function fetchFiles() {
+            try {
+                const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${REPOSITORY_NAME}/contents/${FOLDER_NAME}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('ไม่พบโฟลเดอร์หรือตั้งชื่อ Repo ผิด');
+                
+                const files = await response.json();
+                
+                files.forEach(file => {
+                    if (file.name.endsWith('.py') || file.name.endsWith('.js')) {
+                        const option = document.createElement('option');
+                        option.value = file.download_url; 
+                        option.textContent = file.name;
+                        fileSelect.appendChild(option);
+                    }
+                });
+            } catch (error) {
+                codeViewer.textContent = "เกิดข้อผิดพลาดในการดึงไฟล์: " + error.message;
+            }
+        }
+
+        // 3. เมื่อเลือกไฟล์ ให้ดึงเนื้อหาโค้ดมาแสดง
+        fileSelect.addEventListener('change', async (e) => {
+            const url = e.target.value;
+            currentFileName = e.target.options[e.target.selectedIndex].text;
+            
+            outputArea.style.display = 'none';
+            
+            if (!url) {
+                codeViewer.textContent = "เนื้อหาโค้ดจะแสดงที่นี่...";
+                currentCode = '';
+                runBtn.disabled = true;
+                return;
+            }
+
+            codeViewer.textContent = "กำลังโหลดโค้ด...";
+            try {
+                const response = await fetch(url);
+                currentCode = await response.text();
+                codeViewer.textContent = currentCode;
+                
+                // เปิดปุ่มรันถ้า Pyodide โหลดเสร็จแล้ว หรือถ้าเป็นไฟล์ JS
+                if (currentFileName.endsWith('.js') || (currentFileName.endsWith('.py') && pyodide)) {
+                    runBtn.disabled = false;
+                }
+            } catch (error) {
+                codeViewer.textContent = "ไม่สามารถโหลดเนื้อหาไฟล์ได้";
+                runBtn.disabled = true;
+            }
+        });
+
+        // 4. เมื่อกดปุ่ม Run
+        runBtn.addEventListener('click', async () => {
+            if (!currentCode) return alert('กรุณาเลือกไฟล์ก่อนทำการ Run');
+
+            outputArea.style.display = 'block';
+            outputArea.textContent = 'Running...\n-----------------\n';
+
+            if (currentFileName.endsWith('.js')) {
+                // รัน JavaScript
+                try {
+                    let outputLog = [];
+                    const originalConsoleLog = console.log;
+                    console.log = function(...args) {
+                        outputLog.push(args.join(' '));
+                    };
+
+                    eval(currentCode); 
+                    
+                    console.log = originalConsoleLog; 
+                    if (outputLog.length > 0) {
+                        outputArea.textContent += outputLog.join('\n');
+                    } else {
+                        outputArea.textContent += "(ไม่มี Output ออกทาง Console)";
+                    }
+                } catch (error) {
+                    outputArea.textContent += `Error:\n${error.message}`;
+                }
+            } else if (currentFileName.endsWith('.py')) {
+                // รัน Python ผ่าน Pyodide
+                try {
+                    // Pyodide จะส่งผล print() เข้าสู่ callback ที่เราตั้งไว้ตอน init
+                    await pyodide.runPythonAsync(currentCode);
+                } catch (error) {
+                    outputArea.textContent += `Python Error:\n${error}`;
+                }
+            }
+        });
+
+        // เริ่มต้นการทำงาน
+        initPyodide();
+        fetchFiles();
+    </script>
+</body>
+</html>
