@@ -6,7 +6,7 @@
     <title>Code Viewer & Runner (Local Pyodide)</title>
     
     <!-- เปลี่ยนจาก CDN มาดึงไฟล์จากโฟลเดอร์ node_modules ใน Repo แทน -->
-    <script src="./node_modules/pyodide/pyodide.js"></script>
+    <script src="./libs/pyodide/pyodide.js"></script>
     
     <style>
         /* พื้นหลังสีน้ำเงิน */
@@ -145,7 +145,7 @@
             try {
                 pyodide = await loadPyodide({
                     // *** สิ่งสำคัญ: ระบุโฟลเดอร์ที่เก็บไฟล์ Pyodide ***
-                    indexURL: "./node_modules/pyodide/", 
+                    indexURL: "./libs/pyodide/", 
                     stdout: (text) => {
                         outputArea.textContent += text + '\n';
                     },
